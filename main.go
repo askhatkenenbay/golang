@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/askhatkenenbay/golang/internal/database"
 	"github.com/go-chi/chi"
@@ -33,9 +34,9 @@ func main() {
 	if err != nil {
 		log.Fatal("Cannot connect to database: ", err)
 	}
-
+	dbQueries := database.New(conn)
 	apiCfg := apiConfig{
-		DB: database.New(conn),
+		DB: dbQueries,
 	}
 
 	router := chi.NewRouter()
@@ -51,20 +52,29 @@ func main() {
 	v1Router := chi.NewRouter()
 	v1Router.Get("/health", handlerHealth)
 	v1Router.Get("/error", handlerError)
+
 	v1Router.Post("/users", apiCfg.handlerUsersCreate)
 	v1Router.Get("/users", apiCfg.middlewareAuth(apiCfg.handlerGetUser))
+
 	v1Router.Post("/feeds", apiCfg.middlewareAuth(apiCfg.handlerCreateFeed))
 	v1Router.Get("/feeds", apiCfg.handlerGetFeeds)
+
+	v1Router.Post("/feed_follow", apiCfg.middlewareAuth(apiCfg.handlerCreateFeedFollow))
+	v1Router.Get("/feed_follows", apiCfg.middlewareAuth(apiCfg.handlerFeedFollowsGet))
+	v1Router.Delete("/feed_follows/{feedFollowID}", apiCfg.middlewareAuth(apiCfg.handlerFeedFollowDelete))
+
+	v1Router.Get("/posts", apiCfg.middlewareAuth(apiCfg.handlerPostsGet))
+
 	router.Mount("/v1", v1Router)
 
 	srv := &http.Server{
 		Handler: router,
 		Addr:    ":" + portString,
 	}
-	log.Printf("Server starting on port %v", portString)
+	const collectionConcurrency = 10
+	const collectionInterval = time.Minute
+	go startScraping(dbQueries, collectionConcurrency, collectionInterval)
 
-	err = srv.ListenAndServe()
-	if err != nil {
-		log.Fatal(err)
-	}
+	log.Printf("Serving on port: %s\n", portString)
+	log.Fatal(srv.ListenAndServe())
 }
